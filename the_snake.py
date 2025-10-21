@@ -64,6 +64,7 @@ clock = None
 # Типы объектов
 class ObjectType:
     """Типы игровых объектов."""
+
     APPLE = "apple"
     POISON = "poison"
     STONE = "stone"
