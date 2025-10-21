@@ -382,93 +382,6 @@ def handle_keys(game_object) -> None:
     pass
 
 
-def main():
-    """Главная функция игры."""
-    # Используем глобальные переменные screen и clock
-    global screen, clock
-
-    # Инициализация состояния игры
-    game_state = GameState()
-    game_state.generate_objects()
-
-    font = pygame.font.SysFont(None, 36)
-    small_font = pygame.font.SysFont(None, 24)
-
-    # Основной игровой цикл
-    while game_state.running:
-        # Обработка событий
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                game_state.running = False
-                continue
-
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    game_state.running = False
-                    continue
-
-                if event.key in (
-                    pygame.K_UP, pygame.K_DOWN,
-                    pygame.K_LEFT, pygame.K_RIGHT
-                ):
-                    game_state.snake.update_direction(event.key)
-
-                if event.key == pygame.K_q:
-                    game_state.fps = max(MIN_FPS, game_state.fps - 1)
-
-                if event.key == pygame.K_w:
-                    game_state.fps = min(MAX_FPS, game_state.fps + 1)
-
-                if event.key == pygame.K_r and game_state.game_over:
-                    game_state.snake.reset()
-                    game_state.fps = START_FPS
-                    game_state.generate_objects()
-                    game_state.game_over = False
-
-        # Отрисовка игры
-        screen.fill(BOARD_BACKGROUND_COLOR)
-
-        if game_state.game_over:
-            # Экран завершения игры
-            draw_center_message(
-                screen,
-                f"Игра окончена! Длина: {game_state.snake.length}",
-                font,
-                COLOR_TEXT
-            )
-            draw_message(
-                screen,
-                "Нажмите R для рестарта или ESC для выхода",
-                small_font,
-                COLOR_TEXT
-            )
-        else:
-            # Игровой процесс
-            # Движение змейки
-            game_state.snake.move()
-
-            # Проверка столкновений
-            game_state.check_collisions()
-
-            # Отрисовка объектов
-            for obj in (
-                game_state.apples + game_state.stones
-                + game_state.poisons
-            ):
-                obj.draw(screen)
-            game_state.snake.draw(screen)
-
-            # Обновление заголовка
-            update_caption(game_state)
-
-        # Обновление экрана
-        pygame.display.update()
-        clock.tick(game_state.fps)
-
-    pygame.quit()
-    sys.exit(0)
-
-
 def draw_center_message(
     surface: pygame.Surface,
     text: str,
@@ -501,6 +414,110 @@ def update_caption(game_state: GameState) -> None:
         "ESC — выход"
     )
     pygame.display.set_caption(caption)
+
+
+def handle_events(game_state: GameState) -> None:
+    """Обработать события игры."""
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            game_state.running = False
+            continue
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                game_state.running = False
+                continue
+
+            if event.key in (
+                pygame.K_UP, pygame.K_DOWN,
+                pygame.K_LEFT, pygame.K_RIGHT
+            ):
+                game_state.snake.update_direction(event.key)
+
+            if event.key == pygame.K_q:
+                game_state.fps = max(MIN_FPS, game_state.fps - 1)
+
+            if event.key == pygame.K_w:
+                game_state.fps = min(MAX_FPS, game_state.fps + 1)
+
+            if event.key == pygame.K_r and game_state.game_over:
+                game_state.snake.reset()
+                game_state.fps = START_FPS
+                game_state.generate_objects()
+                game_state.game_over = False
+
+
+def draw_game_over_screen(game_state: GameState, font: pygame.font.Font,
+                          small_font: pygame.font.Font) -> None:
+    """Отрисовать экран завершения игры."""
+    draw_center_message(
+        screen,
+        f"Игра окончена! Длина: {game_state.snake.length}",
+        font,
+        COLOR_TEXT
+    )
+    draw_message(
+        screen,
+        "Нажмите R для рестарта или ESC для выхода",
+        small_font,
+        COLOR_TEXT
+    )
+
+
+def draw_game_objects(game_state: GameState) -> None:
+    """Отрисовать игровые объекты."""
+    for obj in (
+        game_state.apples + game_state.stones
+        + game_state.poisons
+    ):
+        obj.draw(screen)
+    game_state.snake.draw(screen)
+
+
+def update_game_state(game_state: GameState) -> None:
+    """Обновить состояние игры."""
+    # Движение змейки
+    game_state.snake.move()
+
+    # Проверка столкновений
+    game_state.check_collisions()
+
+    # Обновление заголовка
+    update_caption(game_state)
+
+
+def main():
+    """Главная функция игры."""
+    # Используем глобальные переменные screen и clock
+    global screen, clock
+
+    # Инициализация состояния игры
+    game_state = GameState()
+    game_state.generate_objects()
+
+    font = pygame.font.SysFont(None, 36)
+    small_font = pygame.font.SysFont(None, 24)
+
+    # Основной игровой цикл
+    while game_state.running:
+        # Обработка событий
+        handle_events(game_state)
+
+        # Отрисовка игры
+        screen.fill(BOARD_BACKGROUND_COLOR)
+
+        if game_state.game_over:
+            draw_game_over_screen(game_state, font, small_font)
+        else:
+            update_game_state(game_state)
+            draw_game_objects(game_state)
+
+        # Обновление экрана
+        pygame.display.update()
+        clock.tick(game_state.fps)
+
+    pygame.quit()
+    sys.exit(0)
 
 
 if __name__ == "__main__":
