@@ -1,0 +1,398 @@
+# Новиков Кирилл. Змейка
+from __future__ import annotations
+import json
+import os
+import random
+import sys
+from typing import List, Tuple, Set
+
+import pygame
+
+# === Константы ===
+WINDOW_WIDTH = 640
+WINDOW_HEIGHT = 480
+CELL_SIZE = 20
+CELLS_X = WINDOW_WIDTH // CELL_SIZE
+CELLS_Y = WINDOW_HEIGHT // CELL_SIZE
+
+# Цвета
+COLOR_BG = (0, 0, 0)
+COLOR_APPLE = (255, 0, 0)
+COLOR_SNAKE = (0, 255, 0)
+COLOR_HEAD = (0, 200, 0)
+COLOR_TEXT = (255, 255, 255)
+COLOR_POISON = (255, 100, 255)
+COLOR_STONE = (100, 100, 100)
+
+# Параметры
+START_FPS = 10
+MAX_FPS = 25
+MIN_FPS = 5
+APPLE_COUNT = 3
+STONE_COUNT = 5
+POISON_COUNT = 2
+
+# Файл рекорда
+RECORD_FILE = "snake_record.json"
+
+# Поле клеток
+ALL_CELLS: Set[Tuple[int, int]] = {
+    (x * CELL_SIZE, y * CELL_SIZE)
+    for x in range(CELLS_X)
+    for y in range(CELLS_Y)
+}
+
+# Направления
+DIR_RIGHT = (CELL_SIZE, 0)
+DIR_LEFT = (-CELL_SIZE, 0)
+DIR_UP = (0, -CELL_SIZE)
+DIR_DOWN = (0, CELL_SIZE)
+DEFAULT_DIRECTION = DIR_RIGHT
+
+# Словарь направлений
+DIRECTION_MAP = {
+    (pygame.K_RIGHT, DIR_UP): DIR_RIGHT,
+    (pygame.K_RIGHT, DIR_DOWN): DIR_RIGHT,
+    (pygame.K_LEFT, DIR_UP): DIR_LEFT,
+    (pygame.K_LEFT, DIR_DOWN): DIR_LEFT,
+    (pygame.K_UP, DIR_LEFT): DIR_UP,
+    (pygame.K_UP, DIR_RIGHT): DIR_UP,
+    (pygame.K_DOWN, DIR_LEFT): DIR_DOWN,
+    (pygame.K_DOWN, DIR_RIGHT): DIR_DOWN,
+}
+
+
+# Типы объектов
+class ObjectType:
+    APPLE = "apple"
+    POISON = "poison"
+    STONE = "stone"
+
+
+def load_record(filename: str) -> int:
+    if not os.path.exists(filename):
+        return 0
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return int(data.get("record", 0))
+    except Exception:
+        return 0
+
+
+def save_record(filename: str, value: int) -> None:
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump({"record": int(value)}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+class GameObject:
+
+    def __init__(self, position: Tuple[int, int], color: Tuple[int, int, int]):
+        self.position = position
+        self.color = color
+        self._old_position = position  # Для отслеживания изменений позиции
+
+    def draw(self, surface: pygame.Surface) -> None:
+        self.draw_cell(surface, self.position, self.color)
+
+    def erase(self, surface: pygame.Surface) -> None:
+        self.draw_cell(surface, self.position, COLOR_BG)
+
+    @staticmethod
+    def draw_cell(surface: pygame.Surface, position: Tuple[int, int], color: Tuple[int, int, int]):
+        rect = pygame.Rect(position[0], position[1], CELL_SIZE, CELL_SIZE)
+        pygame.draw.rect(surface, color, rect)
+        pygame.draw.rect(surface, COLOR_BG, rect, 1)  # Черная рамка
+
+    def randomize_position(self, occupied: Set[Tuple[int, int]]) -> None:
+        free_cells = ALL_CELLS - occupied
+        if free_cells:
+            self.position = random.choice(tuple(free_cells))
+
+
+class Collectible(GameObject):
+
+    def __init__(self, occupied: Set[Tuple[int, int]], color: Tuple[int, int, int], obj_type: str):
+        super().__init__((0, 0), color)
+        self.obj_type = obj_type
+        self.randomize_position(occupied)
+
+
+class Apple(Collectible):
+
+    def __init__(self, occupied: Set[Tuple[int, int]]):
+        super().__init__(occupied, COLOR_APPLE, ObjectType.APPLE)
+
+
+class Poison(Collectible):
+
+    def __init__(self, occupied: Set[Tuple[int, int]]):
+        super().__init__(occupied, COLOR_POISON, ObjectType.POISON)
+
+
+class Stone(GameObject):
+
+    def __init__(self, occupied: Set[Tuple[int, int]]):
+        super().__init__((0, 0), COLOR_STONE)
+        self.randomize_position(occupied)
+
+
+class Snake:
+
+    def __init__(self):
+        cx, cy = (CELLS_X // 2) * CELL_SIZE, (CELLS_Y // 2) * CELL_SIZE
+        self.positions: List[Tuple[int, int]] = [(cx, cy)]
+        self.length = 1
+        self.direction = DEFAULT_DIRECTION
+        self.next_direction = None
+        self.last_tail_position: Tuple[int, int] | None = None
+
+    def get_head_position(self) -> Tuple[int, int]:
+        return self.positions[0]
+
+    def update_direction(self, key: int) -> None:
+        old = self.direction
+        new = DIRECTION_MAP.get((key, old), old)
+
+        # Запрет движения в противоположном направлении для змейки длиной > 1
+        if (new[0] == -old[0] and new[1] == -old[1]) and self.length > 1:
+            return
+        self.next_direction = new
+
+    def move(self) -> None:
+        if self.next_direction:
+            self.direction = self.next_direction
+            self.next_direction = None
+
+        head_x, head_y = self.get_head_position()
+        dx, dy = self.direction
+        new_head = ((head_x + dx) % WINDOW_WIDTH, (head_y + dy) % WINDOW_HEIGHT)
+
+        # Сохраняем позицию хвоста перед удалением
+        if len(self.positions) >= self.length:
+            self.last_tail_position = self.positions[-1]
+
+        # Вставляем новую голову
+        self.positions.insert(0, new_head)
+
+        # Удаляем хвост, если не растём
+        if len(self.positions) > self.length:
+            self.positions.pop()
+
+    def grow(self, amount: int = 1) -> None:
+        self.length += amount
+        if self.length < 1:
+            self.length = 1
+            self.positions = [self.get_head_position()]
+
+    def check_self_collision(self) -> bool:
+        # У короткой змейки не может быть столкновения
+        if self.length < 4:
+            return False
+
+        head = self.get_head_position()
+        return head in self.positions[1:]
+
+    def check_collision_with_position(self, position: Tuple[int, int]) -> bool:
+        return self.get_head_position() == position
+
+    def reset(self) -> None:
+        cx, cy = (CELLS_X // 2) * CELL_SIZE, (CELLS_Y // 2) * CELL_SIZE
+        self.positions = [(cx, cy)]
+        self.length = 1
+        self.direction = DEFAULT_DIRECTION
+        self.next_direction = None
+        self.last_tail_position = None
+
+    def draw(self, surface: pygame.Surface) -> None:
+        if not self.positions:
+            return
+
+        # Отрисовка головы
+        GameObject.draw_cell(surface, self.positions[0], COLOR_HEAD)
+
+        # Отрисовка тела
+        for segment in self.positions[1:]:
+            GameObject.draw_cell(surface, segment, COLOR_SNAKE)
+
+    def erase_tail(self, surface: pygame.Surface) -> None:
+        if self.last_tail_position and self.last_tail_position not in self.positions:
+            GameObject.draw_cell(surface, self.last_tail_position, COLOR_BG)
+
+
+class GameState:
+
+    def __init__(self):
+        self.record = load_record(RECORD_FILE)
+        self.snake = Snake()
+        self.fps = START_FPS
+        self.running = True
+        self.game_over = False
+        self.apples: List[Apple] = []
+        self.stones: List[Stone] = []
+        self.poisons: List[Poison] = []
+
+    def generate_objects(self) -> None:
+        occupied = set(self.snake.positions)
+
+        # Генерация яблок
+        self.apples = []
+        for _ in range(APPLE_COUNT):
+            apple = Apple(occupied)
+            self.apples.append(apple)
+            occupied.add(apple.position)
+
+        # Генерация камней
+        self.stones = []
+        for _ in range(STONE_COUNT):
+            stone = Stone(occupied)
+            self.stones.append(stone)
+            occupied.add(stone.position)
+
+        # Генерация отравы
+        self.poisons = []
+        for _ in range(POISON_COUNT):
+            poison = Poison(occupied)
+            self.poisons.append(poison)
+            occupied.add(poison.position)
+
+    def check_collisions(self) -> None:
+        head = self.snake.get_head_position()
+
+        # Проверка яблок
+        for apple in self.apples[:]:
+            if head == apple.position:
+                self.snake.grow(1)
+                occupied = set(self.snake.positions) | {obj.position for obj in
+                                                        self.apples + self.stones + self.poisons}
+                apple.randomize_position(occupied)
+
+                # Обновление рекорда
+                if self.snake.length > self.record:
+                    self.record = self.snake.length
+                    save_record(RECORD_FILE, self.record)
+
+        # Проверка отравы
+        for poison in self.poisons[:]:
+            if head == poison.position:
+                self.snake.grow(-1)
+                occupied = set(self.snake.positions) | {obj.position for obj in
+                                                        self.apples + self.stones + self.poisons}
+                poison.randomize_position(occupied)
+
+        # Проверка камней
+        for stone in self.stones:
+            if head == stone.position:
+                self.game_over = True
+                return
+
+        # Проверка самоперекуса
+        if self.snake.check_self_collision():
+            self.snake.reset()
+
+
+def handle_events(game_state: GameState) -> None:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            game_state.running = False
+            return
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                game_state.running = False
+                return
+
+            if event.key in (pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT):
+                game_state.snake.update_direction(event.key)
+
+            if event.key == pygame.K_q:
+                game_state.fps = max(MIN_FPS, game_state.fps - 1)
+
+            if event.key == pygame.K_w:
+                game_state.fps = min(MAX_FPS, game_state.fps + 1)
+
+            if event.key == pygame.K_r and game_state.game_over:
+                game_state.snake.reset()
+                game_state.generate_objects()
+                game_state.game_over = False
+
+
+def draw_center_message(surface: pygame.Surface, text: str, font: pygame.font.Font,
+                        color: Tuple[int, int, int]) -> None:
+    surf = font.render(text, True, color)
+    rect = surf.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2))
+    surface.blit(surf, rect)
+
+
+def draw_message(surface: pygame.Surface, text: str, font: pygame.font.Font, color: Tuple[int, int, int]) -> None:
+    surf = font.render(text, True, color)
+    rect = surf.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 3))
+    surface.blit(surf, rect)
+
+
+def update_caption(game_state: GameState) -> None:
+    caption = (f"Изгиб Питона — длина: {game_state.snake.length} | "
+               f"рекорд: {game_state.record} | скорость: {game_state.fps} | "
+               "ESC — выход")
+    pygame.display.set_caption(caption)
+
+
+def main():
+    pygame.init()
+    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont(None, 36)
+    small_font = pygame.font.SysFont(None, 24)
+
+    # Инициализация состояния игры
+    game_state = GameState()
+    game_state.generate_objects()
+
+    # Основной игровой цикл
+    while game_state.running:
+        # Обработка событий
+        handle_events(game_state)
+        if not game_state.running:
+            break
+
+        # Отрисовка игры
+        screen.fill(COLOR_BG)
+
+        if game_state.game_over:
+            # Экран завершения игры
+            draw_center_message(screen, f"Игра окончена! Длина: {game_state.snake.length}", font, COLOR_TEXT)
+            draw_message(
+                screen,
+                "Нажмите R для рестарта или ESC для выхода",
+                small_font,
+                COLOR_TEXT
+            )
+        else:
+            # Игровой процесс
+            # Движение змейки
+            game_state.snake.move()
+
+            # Проверка столкновений
+            game_state.check_collisions()
+
+            # Отрисовка объектов
+            for obj in game_state.apples + game_state.stones + game_state.poisons:
+                obj.draw(screen)
+            game_state.snake.draw(screen)
+
+            # Обновление заголовка
+            update_caption(game_state)
+
+        # Обновление экрана
+        pygame.display.update()
+        clock.tick(game_state.fps)
+
+    pygame.quit()
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
